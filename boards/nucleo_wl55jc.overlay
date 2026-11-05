@@ -1,0 +1,80 @@
+#include <zephyr/dt-bindings/pinctrl/stm32-pinctrl.h>
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/gpio/arduino-header-r3.h>
+#include <zephyr/dt-bindings/adc/adc.h>
+
+/ {
+    /*
+     * LDR connected to A0
+     * A0 -> ADC1 channel 5
+     */
+    zephyr,user {
+        io-channels = <&adc1 5>;
+    };
+
+    /*
+     * External common-anode RGB LED
+     *
+     * RED   -> D6
+     * GREEN -> D5
+     * BLUE  -> D3
+     *
+     * Common anode -> 3.3 V
+     *
+     * GPIO_ACTIVE_LOW because:
+     * LOW  = LED channel ON
+     * HIGH = LED channel OFF
+     */
+    app_rgb_leds {
+        compatible = "gpio-leds";
+
+        rgb_red: rgb_red {
+            gpios = <&arduino_header
+                     ARDUINO_HEADER_R3_D6
+                     GPIO_ACTIVE_LOW>;
+        };
+
+        rgb_green: rgb_green {
+            gpios = <&arduino_header
+                     ARDUINO_HEADER_R3_D5
+                     GPIO_ACTIVE_LOW>;
+        };
+
+        rgb_blue: rgb_blue {
+            gpios = <&arduino_header
+                     ARDUINO_HEADER_R3_D3
+                     GPIO_ACTIVE_LOW>;
+        };
+    };
+
+    /*
+     * Names used from C with DT_ALIAS(...)
+     */
+    aliases {
+        rgb-red = &rgb_red;
+        rgb-green = &rgb_green;
+        rgb-blue = &rgb_blue;
+        sw0 = &user_button_1;
+    };
+};
+
+
+/*
+ * ADC1 configuration for A0
+ */
+&adc1 {
+    status = "okay";
+
+    #address-cells = <1>;
+    #size-cells = <0>;
+
+    channel@5 {
+        reg = <5>;
+
+        zephyr,gain = "ADC_GAIN_1";
+        zephyr,reference = "ADC_REF_INTERNAL";
+        zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+        zephyr,resolution = <12>;
+    };
+};

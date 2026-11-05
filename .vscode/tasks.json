@@ -1,0 +1,94 @@
+{
+    "version": "2.0.0",
+
+    "tasks": [
+        {
+            "label": "Zephyr: Configure",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "-B",
+                "build",
+                "-S",
+                ".",
+                "-GNinja",
+                "-DBOARD=nucleo_wl55jc",
+                "-DZephyr-sdk_DIR=C:/Users/STERALLIA/zephyr-sdk-1.0.1/cmake",
+                "-DDTC_OVERLAY_FILE=C:/Users/STERALLIA/Documents/GitHub/Blink-exercise-EMB-MasterIOT-UPM/boards/nucleo_wl55jc.overlay",
+                "-DCONF_FILE=C:/Users/STERALLIA/Documents/GitHub/Blink-exercise-EMB-MasterIOT-UPM/confs/prj_nucleo_wl55jc.conf"
+            ],
+            "options": {
+                "cwd": "C:/Users/STERALLIA/Documents/GitHub/Blink-exercise-EMB-MasterIOT-UPM",
+                "env": {
+                    "ZEPHYR_BASE": "C:/Users/STERALLIA/Documents/zephyrproject/zephyr",
+                    "ZEPHYR_SDK_INSTALL_DIR": "C:/Users/STERALLIA/zephyr-sdk-1.0.1"
+                }
+            },
+            "problemMatcher": []
+        },
+
+        {
+            "label": "Zephyr: Build",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "build"
+            ],
+            "options": {
+                "cwd": "C:/Users/STERALLIA/Documents/GitHub/Blink-exercise-EMB-MasterIOT-UPM",
+                "env": {
+                    "ZEPHYR_BASE": "C:/Users/STERALLIA/Documents/zephyrproject/zephyr",
+                    "ZEPHYR_SDK_INSTALL_DIR": "C:/Users/STERALLIA/zephyr-sdk-1.0.1"
+                }
+            },
+            "problemMatcher": []
+        },
+
+        {
+            "label": "Zephyr: Flash",
+            "type": "shell",
+            "command": "C:/Program Files/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin/STM32_Programmer_CLI.exe",
+            "args": [
+                "--connect",
+                "port=swd",
+                "mode=UR",
+                "reset=HWrst",
+                "--download",
+                "C:/Users/STERALLIA/Documents/GitHub/Blink-exercise-EMB-MasterIOT-UPM/build/zephyr/zephyr.hex",
+                "--start"
+            ],
+            "options": {
+                "cwd": "C:/Users/STERALLIA/Documents/GitHub/Blink-exercise-EMB-MasterIOT-UPM"
+            },
+            "problemMatcher": []
+        },
+
+        {
+            "label": "Serial Monitor: COM3",
+            "type": "shell",
+            "command": "C:/Program Files/PuTTY/plink.exe",
+            "args": [
+                "-serial",
+                "COM3",
+                "-sercfg",
+                "115200,8,n,1,N"
+            ],
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            }
+        },
+
+        {
+            "label": "Zephyr: Build + Flash",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "Zephyr: Build",
+                "Zephyr: Flash"
+            ],
+            "problemMatcher": []
+        }
+    ]
+}
