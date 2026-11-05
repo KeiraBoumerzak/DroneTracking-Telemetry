@@ -7,11 +7,11 @@ project(blink_basic)
 
 target_sources(app PRIVATE
     src/main.c
-    src/ldr.c
-    src/rgb.c
-    src/brightness_thread.c
-    src/button_handler.c
-    src/fsm.c
+    src/sensor/ldr.c
+    src/actuator/rgb.c
+    src/actuator/button_handler.c
+    src/control/brightness_thread.c
+    src/control/fsm.c
 )
 
-target_include_directories(app PRIVATE src)
+target_include_directories(app PRIVATE headers)
