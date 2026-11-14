@@ -1,14 +1,14 @@
 /* common.h - things we both use.*/
 
-#ifndef COMMON_H
-#define COMMON_H
+#ifndef DATA_COMMON_H
+#define DATA_COMMON_H
 
 #include <stdbool.h>
 #include <stdint.h>
 
 /* how often the threads run */
-#define IMU_PERIOD_MS  20      /* sensors thread (me Kira)  */
-#define APP_PERIOD_MS  100     /* app thread (u Adrian)    */
+#define IMU_PERIOD_MS  20      /* sensors thread   */
+#define APP_PERIOD_MS  100     /* app thread   */
 
 /* modes (B1 changes them) */
 #define MODE_TEST    0
@@ -41,8 +41,6 @@ void data_lock(void);          /* always lock before using d */
 void data_unlock(void);
 int get_mode(void);
 
-/* gps.c */
-int gps_init(void);
 
 /* printk that stays quiet in SIMU mode */
 #define DBG(...) do { if (get_mode() != MODE_SIMU) printk(__VA_ARGS__); } while (0)

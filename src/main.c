@@ -2,7 +2,8 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 #include <string.h>
-#include "common.h"
+#include "data_common.h"
+#include "gps.h"
 
 /* shared data: sensors and GPS write here, the app reads it */
 struct data d;

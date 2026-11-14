@@ -2,8 +2,8 @@
  * TODO: the interrupt collects a line, a queue + work item read it,
  * puting position and fix in the shared data. */
 #include <zephyr/kernel.h>
-#include "common.h"
-
+#include "data_common.h"
+#include "gps.h"
 /* start the GPS (empty for now) */
 int gps_init(void)
 {

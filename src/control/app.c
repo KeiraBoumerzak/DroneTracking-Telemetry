@@ -4,4 +4,4 @@
  * In SIMU only the frame is printed. */
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
-#include "common.h"
+#include "data_common.h"

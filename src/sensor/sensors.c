@@ -3,4 +3,4 @@
  * convert to real units, put the values in the shared data. */
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
-#include "common.h"
+#include "data_common.h"
