@@ -181,3 +181,19 @@ void fsm_update_imu_data(float ax, float ay, float az, float gx, float gy, float
         k_mutex_unlock(&fsm_mutex);
     }
 }
+
+bool fsm_get_telemetry(TelemetryPacket *out)
+{
+    if (out == NULL) {
+        return false;
+    }
+
+    if (k_mutex_lock(&fsm_mutex, K_FOREVER) != 0) {
+        return false;
+    }
+
+    *out = data;
+
+    k_mutex_unlock(&fsm_mutex);
+    return true;
+}

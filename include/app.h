@@ -31,5 +31,6 @@ typedef struct {
 void fsm_update_gps_data(uint8_t fix, uint8_t sats, double lat, double lon, float alt);
 void fsm_update_environment_data(float light, float temp, float hum);
 void fsm_update_imu_data(float ax, float ay, float az, float gx, float gy, float gz);
+bool fsm_get_telemetry(TelemetryPacket *out);
 
 #endif
