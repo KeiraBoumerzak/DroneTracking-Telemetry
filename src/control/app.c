@@ -10,6 +10,10 @@
 
 #define FSM_STACK_SIZE 1024
 #define FSM_PRIORITY   7
+#define TEST_TIMER 2000
+#define NORMAL_TIMER_IMU 50
+#define NORMAL_TIMER_GPS 1000
+#define NORMAL_TIMER_ENV 2000
 
 typedef enum {
     STATE_TEST,
@@ -20,6 +24,10 @@ typedef enum {
 static state_t current_state = STATE_TEST;
 
 static TelemetryPacket data;
+
+extern struct k_timer imu_timer;
+extern struct k_timer gps_timer;
+extern struct k_timer env_timer;
 
 K_THREAD_DEFINE(fsm_tid,
                 FSM_STACK_SIZE,
@@ -53,14 +61,23 @@ static bool fsm_state_compare(state_t next_state)
 
 static void fsm_start_test(void)
 {
+    k_timer_start(&imu_timer, K_MSEC(TEST_TIMER), K_MSEC(TEST_TIMER));
+    k_timer_start(&gps_timer, K_MSEC(TEST_TIMER), K_MSEC(TEST_TIMER));
+    k_timer_start(&env_timer, K_MSEC(TEST_TIMER), K_MSEC(TEST_TIMER));
 }
 
 static void fsm_start_normal(void)
 {
+    k_timer_start(&imu_timer, K_MSEC(NORMAL_TIMER_IMU), K_MSEC(NORMAL_TIMER_IMU));
+    k_timer_start(&gps_timer, K_MSEC(NORMAL_TIMER_GPS), K_MSEC(NORMAL_TIMER_GPS));
+    k_timer_start(&env_timer, K_MSEC(NORMAL_TIMER_ENV), K_MSEC(NORMAL_TIMER_ENV));
 }
 
 static void fsm_start_simu(void)
 {
+    k_timer_start(&imu_timer, K_MSEC(NORMAL_TIMER_IMU), K_MSEC(NORMAL_TIMER_IMU));
+    k_timer_start(&gps_timer, K_MSEC(NORMAL_TIMER_GPS), K_MSEC(NORMAL_TIMER_GPS));
+    k_timer_start(&env_timer, K_MSEC(NORMAL_TIMER_ENV), K_MSEC(NORMAL_TIMER_ENV));
 }
 
 static void fsm_change_state()
