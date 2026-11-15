@@ -2,9 +2,9 @@
 #define FSM_H
 
 typedef enum {
-    STATE_OFF,
+    STATE_TEST,
     STATE_NORMAL,
-    STATE_BLUE
+    STATE_SIMU
 } state_t;
 /*
  * Initialize the FSM.

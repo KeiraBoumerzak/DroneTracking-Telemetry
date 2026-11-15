@@ -55,7 +55,7 @@
         rgb-red = &rgb_red;
         rgb-green = &rgb_green;
         rgb-blue = &rgb_blue;
-        sw0 = &user_button_1;
+        sw1 = &user_button_1;
     };
 };
 
