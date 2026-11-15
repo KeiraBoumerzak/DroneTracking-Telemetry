@@ -2,10 +2,21 @@
 #include <zephyr/drivers/i2c.h>
 #include "sensors.h"
 
-/* the I2C bus, from the overlay alias "sensor-i2c" */
+/* the I2C bus, from the overlay alias "sensor-i2c" (MPU6050 + Si7021) */
 const struct device *i2c = DEVICE_DT_GET(DT_ALIAS(sensor_i2c));
 
 float gyro_bias[3] = {0, 0, 0};   /* gyro offset, measured at start-up */
+
+/*                          MPU6050                              */
+/* ============================================================ */
+/* Registers from the MPU6050 register map (datasheet):
+ *   0x75 WHO_AM_I    -> must read 0x68
+ *   0x6B PWR_MGMT_1  -> 0x01: wake up (starts asleep), gyro clock
+ *   0x1A CONFIG      -> 0x04: low-pass filter ~21 Hz (below 25 Hz = half of 50 Hz)
+ *   0x19 SMPLRT_DIV  -> 19:   1000 / (1 + 19) = 50 Hz
+ *   0x1B GYRO_CONFIG -> 0x08: +-500 deg/s, 65.5 LSB per deg/s
+ *   0x1C ACCEL_CONFIG-> 0x08: +-4 g, 8192 LSB per g
+ *   0x3B..0x48       -> 14 data bytes: accel X,Y,Z / temp / gyro X,Y,Z */
 
 /* check the MPU6050 answers. Returns true if found. */
 bool imu_check(void)
@@ -57,34 +68,93 @@ bool imu_read(float acc[3], float gyro[3])
 	}
 
 	for (int i = 0; i < 3; i++) {
-		int16_t a = (raw[2 * i] << 8) | raw[2 * i + 1];      /* bytes 0-5 */
-		int16_t g = (raw[8 + 2 * i] << 8) | raw[9 + 2 * i];  /* bytes 8-13 */
-		acc[i]  = a / 8192.0f * 9.81f;   /* +-4 g: 8192 per g */
+		int16_t a = (raw[2 * i] << 8) | raw[2 * i + 1];      /* bytes 0-5: join high + low */
+		int16_t g = (raw[8 + 2 * i] << 8) | raw[9 + 2 * i];  /* bytes 8-13 (6-7 = temp, skipped) */
+		acc[i]  = a / 8192.0f * 9.81f;   /* +-4 g: 8192 per g -> m/s2 */
 		gyro[i] = g / 65.5f;             /* +-500 deg/s: 65.5 per deg/s */
 	}
 	acc[2] = acc[2] - ACC_Z_OFFSET;      /* remove the measured Z offset */
 	return true;
 }
 
+
+/*                    Si7021 (temp + humidity)                   */
+/* ============================================================ */
+/* Commands and formulas from the Si7021 datasheet:
+ *   0xF5 = measure humidity, "no hold master mode": the sensor measures alone
+ *          and the I2C bus stays free (the MPU can still use it)
+ *   0xE0 = read the temperature taken during that same humidity measurement
+ *          (no second measurement, no extra wait)
+ *   humidity %  = 125    * code / 65536 - 6
+ *   temperature = 175.72 * code / 65536 - 46.85   (code = 16-bit raw value)
+ * A measurement takes about 20 ms, so we start it and read it 40 ms later. */
+
+/* step 1: send 0xF5 = "start measuring humidity" */
+bool si_start(void)
+{
+	uint8_t cmd = 0xF5;
+	return i2c_write(i2c, &cmd, 1, SI_ADDR) == 0;
+}
+
+/* step 2 (40 ms later): collect humidity, then ask for the temperature (0xE0) */
+bool si_read(float *temp, float *hum)
+{
+	uint8_t buf[2];
+	uint8_t cmd = 0xE0;
+
+	/* humidity: the sensor sends 2 bytes (high, low) */
+	if (i2c_read(i2c, buf, 2, SI_ADDR) != 0) {
+		return false;                            /* no answer */
+	}
+	uint16_t code = (buf[0] << 8) | buf[1];      /* join the 2 bytes */
+	*hum = 125.0f * code / 65536.0f - 6.0f;      /* raw -> % (datasheet) */
+	if (*hum < 0)   *hum = 0;                    /* keep it in 0..100 % */
+	if (*hum > 100) *hum = 100;
+
+	/* temperature: send 0xE0, the sensor answers 2 bytes */
+	if (i2c_write_read(i2c, SI_ADDR, &cmd, 1, buf, 2) != 0) {
+		return false;
+	}
+	code = (buf[0] << 8) | buf[1];
+	*temp = 175.72f * code / 65536.0f - 46.85f;  /* raw -> deg C (datasheet) */
+	return true;
+}
+
+/*                       sensors thread                          */
+/* ============================================================ */
+
 void sensors_thread(void)
 {
-	int64_t wake_time = k_uptime_get();   /* time now, in ms */
-	int loops = 0;                        /* how many times we ran */
-	int cal_count = 0;                    /* samples used for gyro calibration */
-	float acc[3] = {0}, gyro[3] = {0};    /* latest values */
+		int loops = 0;                        /* how many times we ran */
 
 	if (!device_is_ready(i2c)) {          /* is the I2C bus working? */
 		SENSOR_DBG("I2C bus not ready\n");
 	}
+
+	/* MPU6050 */
+	int cal_count = 0;                    /* samples used for gyro calibration */
+	float acc[3] = {0}, gyro[3] = {0};    /* latest IMU values */
 	bool imu_ok = imu_check();            /* is the MPU6050 there? */
 	if (imu_ok) {
 		imu_setup();
 	}
 
+	/* Si7021 */
+	float temp = 0, hum = 0;              /* last good values */
+	bool si_ok = false;                   /* Si7021 working? */
+	bool si_started = si_start();         /* start one now, so the first read (40 ms) works */
+
+    /* tested: the first ENV line was 0.0 / si_ok = 0. The setup takes ~60 ms,
+	 * so wake_time was already in the past and the first loops ran with no wait:
+	 * we read the Si7021 before it finished. Taking the time here fixes it. */
+	int64_t wake_time = k_uptime_get();   /* time now, in ms */
+
 	while (1) {
 		wake_time = wake_time + IMU_PERIOD_MS;   /* next wake-up: 20 ms later */
 		k_sleep(K_TIMEOUT_ABS_MS(wake_time));    /* sleep until that time */
 		loops = loops + 1;
+
+		/* ------------------ MPU6050: every loop (20 ms) ------------------ */
 
 		/* MPU lost? try again once per second */
 		if (!imu_ok && loops % 50 == 0) {
@@ -123,7 +193,25 @@ void sensors_thread(void)
 			}
 		}   /* end of if (imu_ok) */
 
-		if (loops % 50 == 0) {                   /* every 1 s */
+		/* ------------------ Si7021: every 2 s ------------------ */
+		/* phase 0: order a measurement, phase 2 (40 ms later): collect it.
+		 * The thread never waits, so the MPU keeps its 20 ms rhythm.
+		 * If it fails: si_ok = false and the last good values are kept (spec 2.4.9). */
+		int phase = loops % ENV_LOOPS;
+		if (phase == 0) {
+			si_started = si_start();
+		} else if (phase == 2) {
+			if (si_started && si_read(&temp, &hum)) {
+				si_ok = true;
+			} else {
+				si_ok = false;                   /* keep the last good values */
+			}
+			SENSOR_DBG("ENV: temp = %+05.1f C | hum = %05.1f %% | si_ok = %d\n",
+			           (double)temp, (double)hum, si_ok);
+		}
+
+		/* ------------------ test print: every 1 s ------------------ */
+		if (loops % 50 == 0) {
 			if (!imu_ok) {
 				SENSOR_DBG("IMU: not working, retrying...\n");
 			} else if (cal_count >= CAL_LOOPS) {  /* print only after calibration */
@@ -134,8 +222,8 @@ void sensors_thread(void)
 				           (double)gyro[0], (double)gyro[1], (double)gyro[2]);
 			}
 		}
-	}   
-}       
+	}   /* end of while */
+}       /* end of sensors_thread */
 
 /* start the thread: stack 2048, priority 2, starts 100 ms after boot */
 K_THREAD_DEFINE(sensors_id, 2048, sensors_thread, NULL, NULL, NULL, 2, 0, 100);
