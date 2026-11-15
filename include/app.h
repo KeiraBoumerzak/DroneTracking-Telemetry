@@ -11,6 +11,12 @@ typedef enum {
     TRACKER_STATE_PROBLEM
 } tracker_state_t;
 
+typedef enum {
+    STATE_TEST,
+    STATE_NORMAL,
+    STATE_SIMU
+} state_t;
+
 typedef struct {
     uint32_t seq;
     uint32_t timestamp_ms;
@@ -32,5 +38,6 @@ void fsm_update_gps_data(uint8_t fix, uint8_t sats, double lat, double lon, floa
 void fsm_update_environment_data(float light, float temp, float hum);
 void fsm_update_imu_data(float ax, float ay, float az, float gx, float gy, float gz);
 bool fsm_get_telemetry(TelemetryPacket *out);
+state_t fsm_get_state();
 
 #endif

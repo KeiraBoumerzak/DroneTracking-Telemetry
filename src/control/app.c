@@ -15,12 +15,6 @@
 #define NORMAL_TIMER_GPS 1000
 #define NORMAL_TIMER_ENV 2000
 
-typedef enum {
-    STATE_TEST,
-    STATE_NORMAL,
-    STATE_SIMU
-} state_t;
-
 static state_t current_state = STATE_TEST;
 
 static TelemetryPacket data;
@@ -196,4 +190,9 @@ bool fsm_get_telemetry(TelemetryPacket *out)
 
     k_mutex_unlock(&fsm_mutex);
     return true;
+}
+
+state_t fsm_get_state()
+{
+    return current_state;
 }
