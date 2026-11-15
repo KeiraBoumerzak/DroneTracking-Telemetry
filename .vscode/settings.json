@@ -8,7 +8,7 @@
 
     "ZEPHYR_DIR": "C:/Asignaturas/EMB_PLA_COM/zephyrproject",
 
-    "PROJECT_DIR": "C:/Users/adria/Downloads/Blink-exercise-EMB-MasterIOT-UPM/"
+    "PROJECT_DIR": "C:/Users/adria/Downloads/DroneTracking-Telemetry/"
   },
 
   "cortex-debug.armToolchainPath":
