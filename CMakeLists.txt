@@ -9,6 +9,7 @@ target_sources(app PRIVATE
     src/control/app.c
     src/control/util.c
     src/actuator/led.c
+    src/actuator/button_handler.c
 )
 
 target_include_directories(app PRIVATE include)
