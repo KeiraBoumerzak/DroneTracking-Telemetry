@@ -72,7 +72,6 @@ bool imu_read(float acc[3], float gyro[3])
 
 /*                    Si7021 (temp + humidity)                   */
 /* ============================================================ */
-/* A measurement takes about 20 ms, so we start it and read it 40 ms later. */
 
 /* step 1: send 0xF5 = "start measuring humidity" */
 bool si_start(void)
@@ -81,7 +80,7 @@ bool si_start(void)
 	return i2c_write(i2c, &cmd, 1, SI_ADDR) == 0;
 }
 
-/* step 2 (40 ms later): collect humidity, then ask for the temperature (0xE0) */
+/* step 2: collect humidity, then ask for the temperature (0xE0) */
 bool si_read(float *temp, float *hum)
 {
 	uint8_t buf[2];
@@ -154,13 +153,12 @@ bool ldr_read(int *raw, float *light)
 	return *raw > 5 && *raw < 4090;
 }
 
-/*                       sensors thread                          */
+
+/*                    IMU thread (MPU6050)                       */
 /* ============================================================ */
-
-void sensors_thread(void)
+/* fast job: every 20 ms (50 Hz), highest priority */
+void imu_thread(void)
 {
-	int loops = 0;                        /* how many times we ran */
-
 	if (!device_is_ready(i2c)) {          /* is the I2C bus working? */
 		SENSOR_DBG("I2C bus not ready\n");
 	}
@@ -173,38 +171,20 @@ void sensors_thread(void)
 		imu_setup();
 	}
 
-	/* Si7021 */
-	float temp = 0, hum = 0;              /* last good values */
-	bool si_ok = false;                   /* Si7021 working? */
-	bool si_started = si_start();         /* start one now, so the first read (40 ms) works */
+	int64_t last_retry = 0;               /* time of the last MPU retry */
+	int64_t last_print = 0;               /* time of the last test print */
 
-    	/* LDR */
-	int ldr_raw = 0;                      /* last ADC value (0..4095) */
-	float light = 0;                      /* last light value (0..100 %) */
-	bool ldr_ready = ldr_init();          /* ADC set up? */
-	bool ldr_ok = false;                  /* LDR value valid? */
-    	if (ldr_ready) {
-		ldr_ok = ldr_read(&ldr_raw,
-             &light);   /* first reading now, so t = 0 shows real light */
-	}
-	if (!ldr_ready) {
-		SENSOR_DBG("LDR: ADC not ready\n");
-	}
-
-    /* tested: the first ENV line was 0.0 / si_ok = 0. The setup takes ~60 ms,
-	 * so wake_time was already in the past and the first loops ran with no wait:
-	 * we read the Si7021 before it finished. Taking the time here fixes it. */
+	/* tested: the setup takes ~60 ms, so wake_time was already in the past
+	 * and the first loops ran with no wait. Taking the time here fixes it. */
 	int64_t wake_time = k_uptime_get();   /* time now, in ms */
 
 	while (1) {
 		wake_time = wake_time + IMU_PERIOD_MS;   /* next wake-up: 20 ms later */
 		k_sleep(K_TIMEOUT_ABS_MS(wake_time));    /* sleep until that time */
-		loops = loops + 1;
-
-		/* ------------------ MPU6050: every loop (20 ms) ------------------ */
 
 		/* MPU lost? try again once per second */
-		if (!imu_ok && loops % 50 == 0) {
+		if (!imu_ok && k_uptime_get() - last_retry >= 1000) {
+			last_retry = k_uptime_get();
 			imu_ok = imu_check();
 			if (imu_ok) {
 				imu_setup();
@@ -240,40 +220,15 @@ void sensors_thread(void)
 			}
 		}   /* end of if (imu_ok) */
 
-        /* send the IMU values to the app every 20 ms (only once calibrated) */
+		/* send the IMU values to the app every 20 ms (only once calibrated) */
 		if (imu_ok && cal_count >= CAL_LOOPS) {
 			fsm_update_imu_data(acc[0], acc[1], acc[2],
 			                    gyro[0], gyro[1], gyro[2]);
 		}
 
-		/* ------------------ Si7021: every 2 s ------------------ */
-		/* phase 0: order a measurement, phase 2 (40 ms later): collect it.
-		 * The thread never waits, so the MPU keeps its 20 ms rhythm.
-		 * If it fails: si_ok = false and the last good values are kept (spec 2.4.9). */
-		int phase = loops % ENV_LOOPS;
-		if (phase == 0) {
-			si_started = si_start();
-		} else if (phase == 2) {
-			if (si_started && si_read(&temp, &hum)) {
-				si_ok = true;
-			} else {
-				si_ok = false;                   /* keep the last good values */
-			}
-			}
-
-            /* ------------------ LDR: every 2 s ------------------ */
-		/* the ADC is fast (much less than 1 ms), so we read it directly */
-		if (phase == 0 && ldr_ready) {
-			ldr_ok = ldr_read(&ldr_raw, &light);
-			}
-
-		/* ------------------ test print: every 2 s ------------------ */
-		if (phase == 3) {
-
-            /* send temp, hum and light to the app every 2 s */
-			fsm_update_environment_data(light, temp, hum);
-            
-			SENSOR_DBG("\n============ SENSORS (t = %d s) ============\n", loops / 50);
+		/* test print: every 1 s */
+		if (k_uptime_get() - last_print >= 1000) {
+			last_print = k_uptime_get();
 			if (!imu_ok) {
 				SENSOR_DBG(" IMU   : not working, retrying...\n");
 			} else if (cal_count < CAL_LOOPS) {
@@ -284,13 +239,67 @@ void sensors_thread(void)
 				SENSOR_DBG(" gyro  [deg/s] X: %+6.1f | Y: %+6.1f | Z: %+6.1f\n",
 				           (double)gyro[0], (double)gyro[1], (double)gyro[2]);
 			}
-			SENSOR_DBG(" temp  : %+5.1f C    hum: %5.1f %%    ok = %d\n",
-			           (double)temp, (double)hum, si_ok);
-			SENSOR_DBG(" light : %5.1f %%     raw: %4d       ok = %d\n",
-			(double)light, ldr_raw, ldr_ok);
-                            }    
-	}   
-}       
+		}
+	}   /* end of while */
+}       /* end of imu_thread */
 
-/* start the thread: stack 2048, priority 2, starts 100 ms after boot */
-K_THREAD_DEFINE(sensors_id, 2048, sensors_thread, NULL, NULL, NULL, 2, 0, 100);
+
+/*              environment thread (Si7021 + LDR)                */
+/* ============================================================ */
+/* slow job: every 2 s, lower priority */
+void env_thread(void)
+{
+	/* Si7021 */
+	float temp = 0, hum = 0;              /* last good values */
+	bool si_ok = false;                   /* Si7021 working? */
+
+	/* LDR */
+	int ldr_raw = 0;                      /* last ADC value (0..4095) */
+	float light = 0;                      /* last light value (0..100 %) */
+	bool ldr_ok = false;                  /* LDR value valid? */
+	bool ldr_ready = ldr_init();          /* ADC set up? */
+	if (!ldr_ready) {
+		SENSOR_DBG("LDR: ADC not ready\n");
+	}
+
+	int64_t wake_time = k_uptime_get();   /* time now, in ms */
+
+	while (1) {
+		/* ------------------ Si7021 ------------------ */
+		/* order a measurement, wait ~20 ms, collect it.
+		 * Waiting is fine here: the IMU runs in its own thread, so it keeps its 20 ms rhythm.
+		 * If it fails: si_ok = false and the last good values are kept (spec 2.4.9). */
+		if (si_start()) {
+			k_msleep(25);                       /* a measurement takes ~20 ms */
+			si_ok = si_read(&temp, &hum);
+		} else {
+			si_ok = false;                      /* no answer: keep the last good values */
+		}
+
+		/* ------------------ LDR ------------------ */
+		/* the ADC is fast (much less than 1 ms), so we read it directly */
+		if (ldr_ready) {
+			ldr_ok = ldr_read(&ldr_raw, &light);
+		}
+
+		/* send temp, hum and light to the app every 2 s */
+		fsm_update_environment_data(light, temp, hum);
+
+		/* test print: every 2 s */
+		SENSOR_DBG(" temp  : %+5.1f C    hum: %5.1f %%    ok = %d\n",
+		           (double)temp, (double)hum, si_ok);
+		SENSOR_DBG(" light : %5.1f %%     raw: %4d       ok = %d\n",
+		           (double)light, ldr_raw, ldr_ok);
+
+                   
+		wake_time = wake_time + ENV_PERIOD_MS;   /* next run: 2 s later */
+		k_sleep(K_TIMEOUT_ABS_MS(wake_time));    /* sleep until that time */
+	}   /* end of while */
+}       /* end of env_thread */
+
+/* start the two threads, 100 ms after boot:
+ * IMU: stack 2048, priority 2 (strict 20 ms deadline)
+ * environment: stack 2048, priority 4 (slow, can wait)
+ * both use the same I2C bus: Zephyr's I2C driver locks it for each transfer */
+K_THREAD_DEFINE(imu_id, 2048, imu_thread, NULL, NULL, NULL, 2, 0, 100);
+K_THREAD_DEFINE(env_id, 2048, env_thread, NULL, NULL, NULL, 4, 0, 100);
