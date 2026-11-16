@@ -41,7 +41,7 @@
 
         "-DDTC_OVERLAY_FILE='./boards/nucleo_wl55jc.overlay'",
 
-        "-DCONF_FILE='./confs/prj_nucleo_wl55jc.conf'",
+        "-DCONF_FILE='./prj.conf'",
 
         "-DUSE_CCACHE=0"
       ],
