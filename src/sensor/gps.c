@@ -7,15 +7,16 @@
 #include "app.h"
 #include "gps.h"
 
-#define GPS_THREAD_STACK_SIZE 1024
+#define GPS_THREAD_STACK_SIZE 2048 /* strtod + two 96-byte buffers need more than 1024 */
 #define GPS_THREAD_PRIORITY   5
 #define UART_NODE DT_NODELABEL(usart1)
-#define GPS_RING_SIZE 256
+#define GPS_RING_SIZE 2048     /* 9600 baud = ~960 bytes/s, thread reads every 1-2 s */
 #define NMEA_LINE_SIZE 96
 #define GGA_FIELD_COUNT 15
 
 K_SEM_DEFINE(gps_sem, 0, 1);
 
+/* timer callback (interrupt context): only wakes the GPS thread */
 static void gps_timer_cb(struct k_timer *timer)
 {
     k_sem_give(&gps_sem);
@@ -33,6 +34,7 @@ static char nmea_line[NMEA_LINE_SIZE];
 static size_t line_len;
 static bool discard_line;
 
+/* UART interrupt: store every received byte in the ring buffer, nothing else */
 static void uart_isr(const struct device *dev, void *user_data)
 {
     ARG_UNUSED(user_data);
@@ -51,10 +53,11 @@ static void uart_isr(const struct device *dev, void *user_data)
 
         if (ring_buf_put(&gps_ring, &byte, 1) != 1)
 		{
-            discard_line = true;
+            discard_line = true;    /* buffer full: this line is broken, drop it */
         }
     }
 }
+/* take one complete NMEA line (ending with \n) out of the ring buffer */
 static bool next_nmea_line(char *line, size_t capacity)
 {
     uint8_t byte;
@@ -106,6 +109,10 @@ static bool next_nmea_line(char *line, size_t capacity)
     return false;
 }
 
+/* read fix, satellites, position and altitude from a GGA line 
+* example with fix:    $GPGGA,123519,4024.123,N,00341.456,W,1,08,0.9,650.0,M,...
+ * example without fix: $GPGGA,123519,,,,,0,03,,,M,...   (position fields are empty)
+ * fields: [2] lat [3] N/S [4] lon [5] E/W [6] fix [7] sats [9] altitude */
 static bool parse_gga_line(const char *line,
                            int *fix,
                            int *satellites,
@@ -117,9 +124,9 @@ static bool parse_gga_line(const char *line,
 {
     char copy[NMEA_LINE_SIZE];
     char *fields[GGA_FIELD_COUNT];
-    size_t len;
     size_t field_count = 0;
-
+    char *end;
+    
     if (line == NULL || fix == NULL || satellites == NULL ||
         lat_nmea == NULL || lat_hemisphere == NULL ||
         lon_nmea == NULL || lon_hemisphere == NULL ||
@@ -127,12 +134,12 @@ static bool parse_gga_line(const char *line,
         return false;
     }
 
-    len = strlen(line);
+     size_t len = strlen(line);
     if (len == 0 || len >= sizeof(copy)) {
         return false;
     }
 
-    memcpy(copy, line, len + 1);
+    memcpy(copy, line, len + 1);    /* work on a copy, we cut it into pieces */
 
     /* Quitar checksum del último campo, si está presente. */
     char *star = strchr(copy, '*');
@@ -140,57 +147,77 @@ static bool parse_gga_line(const char *line,
         *star = '\0';
     }
 
-    char *saveptr = NULL;
-    char *token = strtok_r(copy, ",", &saveptr);
+    /* problem: we used strtok_r(copy, ",") before. strtok treats ",,,," as ONE
+     * separator, so empty fields disappeared. Without a fix (indoors) lat/lon are
+     * empty, all the fields shifted (the fix landed in field 2) and the line was
+     * always rejected, so the app never got fix 0 or the satellite count.
+     * fix: split on EVERY comma by hand, so an empty field stays in its place. */
 
-    while (token != NULL && field_count < GGA_FIELD_COUNT) {
-        fields[field_count++] = token;
-        token = strtok_r(NULL, ",", &saveptr);
+ char *p = copy;
+    fields[field_count++] = p;             /* field 0 starts at the beginning */
+    while (*p != '\0' && field_count < GGA_FIELD_COUNT) {
+        if (*p == ',') {
+            *p = '\0';                     /* end the current field here */
+            fields[field_count++] = p + 1; /* next field starts after the comma (can be empty) */
+        }
+        p++;
     }
 
-    /* Se accede hasta fields[10], por lo que se necesitan 11 campos. */
-    if (field_count < 11 ||
+    /* we use up to fields[9], so we need at least 10 fields, and it must be a GGA line */
+    if (field_count < 10 ||
         strlen(fields[0]) < 3 ||
         strcmp(fields[0] + strlen(fields[0]) - 3, "GGA") != 0) {
         return false;
     }
 
-    if (fields[2][0] == '\0' || fields[3][0] == '\0' ||
-        fields[4][0] == '\0' || fields[5][0] == '\0' ||
-        fields[6][0] == '\0' || fields[7][0] == '\0' ||
-        fields[9][0] == '\0') {
-        return false;
-    }
-
-    char *end;
-
-    *lat_nmea = strtod(fields[2], &end);
-    if (end == fields[2] || *end != '\0') return false;
-    *lat_hemisphere = fields[3][0];
-
-    *lon_nmea = strtod(fields[4], &end);
-    if (end == fields[4] || *end != '\0') return false;
-    *lon_hemisphere = fields[5][0];
-
+    /* change: read fix (field 6) and satellites (field 7) FIRST,
+     * because they are always there, even without a fix */
     long parsed_fix = strtol(fields[6], &end, 10);
     if (end == fields[6] || *end != '\0' || parsed_fix < 0 || parsed_fix > 8) {
         return false;
     }
     *fix = (int)parsed_fix;
 
-    long parsed_satellites = strtol(fields[7], &end, 10);
-    if (end == fields[7] || *end != '\0' ||
-        parsed_satellites < 0 || parsed_satellites > 99) {
+    long parsed_sats = strtol(fields[7], &end, 10);
+    if (end == fields[7] || *end != '\0' || parsed_sats < 0 || parsed_sats > 99) {
         return false;
     }
-    *satellites = (int)parsed_satellites;
+    *satellites = (int)parsed_sats;
 
-    *alt = strtod(fields[9], &end);
+    /* new: no fix -> the position is empty, but the line is still valid.
+     * Return fix 0 + the real satellite count, so the app shows that the GPS
+     * is talking even indoors (the thread then calls fsm_update_gps_data(0, sats, ...)) */
+    if (*fix == 0) {
+        *lat_nmea = 0.0;
+        *lon_nmea = 0.0;
+        *lat_hemisphere = 'N';
+        *lon_hemisphere = 'E';
+        *alt = 0.0;
+        return true;
+    }
+
+    /* with a fix: latitude, longitude and altitude must be there (same as before) */
+    if (fields[2][0] == '\0' || fields[3][0] == '\0' ||
+        fields[4][0] == '\0' || fields[5][0] == '\0' ||
+        fields[9][0] == '\0') {
+        return false;
+    }
+
+    *lat_nmea = strtod(fields[2], &end);   /* ddmm.mmmm, converted to degrees later */
+    if (end == fields[2] || *end != '\0') return false;
+    *lat_hemisphere = fields[3][0];        /* 'N' or 'S' */
+
+    *lon_nmea = strtod(fields[4], &end);   /* dddmm.mmmm */
+    if (end == fields[4] || *end != '\0') return false;
+    *lon_hemisphere = fields[5][0];        /* 'E' or 'W' */
+
+    *alt = strtod(fields[9], &end);        /* altitude in metres */
     if (end == fields[9] || *end != '\0') return false;
 
     return true;
 }
 
+/* ddmm.mmmm (degrees + minutes) -> decimal degrees, S and W negative */
 static bool convert_gga_position(double lat_nmea,
                                  char lat_hemisphere,
                                  double lon_nmea,
@@ -278,6 +305,7 @@ static void gps_thread_entry(void *p1, void *p2, void *p3)
     }
 }
 
+/* start the GPS: UART interrupt, 1 s timer, GPS thread */
 int gps_init(void)
 {
     if (!device_is_ready(uart)) {

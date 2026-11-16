@@ -2,6 +2,7 @@
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/adc.h>
 #include "sensors.h"
+#include "app.h"   
 
 /* the I2C bus, from the overlay alias "sensor-i2c" (MPU6050 + Si7021) */
 const struct device *i2c = DEVICE_DT_GET(DT_ALIAS(sensor_i2c));
@@ -239,6 +240,12 @@ void sensors_thread(void)
 			}
 		}   /* end of if (imu_ok) */
 
+        /* send the IMU values to the app every 20 ms (only once calibrated) */
+		if (imu_ok && cal_count >= CAL_LOOPS) {
+			fsm_update_imu_data(acc[0], acc[1], acc[2],
+			                    gyro[0], gyro[1], gyro[2]);
+		}
+
 		/* ------------------ Si7021: every 2 s ------------------ */
 		/* phase 0: order a measurement, phase 2 (40 ms later): collect it.
 		 * The thread never waits, so the MPU keeps its 20 ms rhythm.
@@ -262,6 +269,10 @@ void sensors_thread(void)
 
 		/* ------------------ test print: every 2 s ------------------ */
 		if (phase == 3) {
+
+            /* send temp, hum and light to the app every 2 s */
+			fsm_update_environment_data(light, temp, hum);
+            
 			SENSOR_DBG("\n============ SENSORS (t = %d s) ============\n", loops / 50);
 			if (!imu_ok) {
 				SENSOR_DBG(" IMU   : not working, retrying...\n");

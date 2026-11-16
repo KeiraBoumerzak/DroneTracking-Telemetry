@@ -3,13 +3,17 @@
 #include <zephyr/sys/printk.h>
 #include "button_handler.h"
 
-#define USER_BUTTON DT_ALIAS(sw1)
+#define USER_BUTTON DT_ALIAS(sw0)
 
 static const struct gpio_dt_spec button = GPIO_DT_SPEC_GET(USER_BUTTON, gpios);
 static struct gpio_callback button_cb;
 
 K_SEM_DEFINE(button_sem, 0, 1);
 
+static int64_t last_press_ms;          /* time of the last accepted press */
+
+/* interrupt: runs when the button is released. Must be short:
+ * it only gives the semaphore, the FSM thread does the real work */
 static void button_isr(const struct device *port,
                        struct gpio_callback *cb,
                        gpio_port_pins_t pins)
@@ -18,6 +22,17 @@ static void button_isr(const struct device *port,
     ARG_UNUSED(cb);
     ARG_UNUSED(pins);
 
+    int64_t now = k_uptime_get();
+
+    /* ignore glitches during start-up (first 1 s after boot) */
+    if (now < 1000) {
+        return;
+    }
+    /* debounce: ignore presses closer than 200 ms (button bounce) */
+    if (now - last_press_ms < 200) {
+        return;
+    }
+    last_press_ms = now;
     //printk("[BUTTON] Press\n");
     k_sem_give(&button_sem);
     

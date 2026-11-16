@@ -7,6 +7,7 @@
 #include "button_handler.h"
 #include <zephyr/sys/printk.h>
 #include "app.h"
+#include "rgb.h"
 
 #define FSM_STACK_SIZE 1024
 #define FSM_PRIORITY   7
@@ -47,16 +48,19 @@ static bool fsm_state_compare(state_t next_state)
 static void fsm_start_test(void)
 {
     k_timer_start(&gps_timer, K_MSEC(TEST_TIMER), K_MSEC(TEST_TIMER));
+    rgb_set(0, 0, 1);    /* TEST: blue */
 }
 
 static void fsm_start_normal(void)
 {
     k_timer_start(&gps_timer, K_MSEC(NORMAL_TIMER_GPS), K_MSEC(NORMAL_TIMER_GPS));
+     rgb_set(0, 1, 0);    /* NORMAL: green*/
 }
 
 static void fsm_start_simu(void)
 {
     k_timer_start(&gps_timer, K_MSEC(NORMAL_TIMER_GPS), K_MSEC(NORMAL_TIMER_GPS));
+    rgb_set(1, 0, 1);    /* SIMU: magenta*/
 }
 
 static void fsm_change_state()

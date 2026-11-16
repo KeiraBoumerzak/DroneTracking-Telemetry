@@ -20,9 +20,9 @@
 
     /* short names used in the code */
     aliases {
-        rgb-red = &rgb_red;
-        rgb-green = &rgb_green;
-        rgb-blue = &rgb_blue;
+        rgb-red = &rgb_red;       /* external RGB LED, red   -> D6 (470 ohm) */
+        rgb-green = &rgb_green;   /* external RGB LED, green -> D5 (470 ohm) */
+        rgb-blue = &rgb_blue;     /* external RGB LED, blue  -> D3 (470 ohm) */
         sw0 = &user_button_1;     /* button B1 */
         sensor-i2c = &i2c2;       /* MPU6050 + Si7021 */
         gps-uart = &usart1;       /* GPS */

@@ -20,5 +20,5 @@
 #define LDR_BRIGHT     120        /* raw value torch   -> 100 %  */
 
 /* ================= test prints ================= */
-#define SENSOR_DEBUG   1           /* 1 = on, 0 = off (final version) */
+#define SENSOR_DEBUG   0           /* 1 = on, 0 = off (final version) */
 #define SENSOR_DBG(...) do { if (SENSOR_DEBUG) printk(__VA_ARGS__); } while (0)
