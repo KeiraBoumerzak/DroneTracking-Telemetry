@@ -19,23 +19,14 @@ static state_t current_state = STATE_TEST;
 
 static TelemetryPacket data;
 
-extern struct k_timer imu_timer;
-extern struct k_timer gps_timer;
-extern struct k_timer env_timer;
+K_MUTEX_DEFINE(fsm_mutex);
 
-K_THREAD_DEFINE(fsm_tid,
-                FSM_STACK_SIZE,
-                fsm_thread,
-                NULL, NULL, NULL,
-                FSM_PRIORITY,
-                0,
-                0);
+extern struct k_timer gps_timer;
                 
 int fsm_init(void)
 {
     current_state = STATE_TEST;
 
-    brightness_sampling_start();
 
     //printk("[MODE] System TEST\n");
 
@@ -55,23 +46,17 @@ static bool fsm_state_compare(state_t next_state)
 
 static void fsm_start_test(void)
 {
-    k_timer_start(&imu_timer, K_MSEC(TEST_TIMER), K_MSEC(TEST_TIMER));
     k_timer_start(&gps_timer, K_MSEC(TEST_TIMER), K_MSEC(TEST_TIMER));
-    k_timer_start(&env_timer, K_MSEC(TEST_TIMER), K_MSEC(TEST_TIMER));
 }
 
 static void fsm_start_normal(void)
 {
-    k_timer_start(&imu_timer, K_MSEC(NORMAL_TIMER_IMU), K_MSEC(NORMAL_TIMER_IMU));
     k_timer_start(&gps_timer, K_MSEC(NORMAL_TIMER_GPS), K_MSEC(NORMAL_TIMER_GPS));
-    k_timer_start(&env_timer, K_MSEC(NORMAL_TIMER_ENV), K_MSEC(NORMAL_TIMER_ENV));
 }
 
 static void fsm_start_simu(void)
 {
-    k_timer_start(&imu_timer, K_MSEC(NORMAL_TIMER_IMU), K_MSEC(NORMAL_TIMER_IMU));
     k_timer_start(&gps_timer, K_MSEC(NORMAL_TIMER_GPS), K_MSEC(NORMAL_TIMER_GPS));
-    k_timer_start(&env_timer, K_MSEC(NORMAL_TIMER_ENV), K_MSEC(NORMAL_TIMER_ENV));
 }
 
 static void fsm_change_state()
@@ -128,6 +113,14 @@ void fsm_thread(void *p1, void *p2, void *p3) {
     }
 }
 
+K_THREAD_DEFINE(fsm_tid,
+                FSM_STACK_SIZE,
+                fsm_thread,
+                NULL, NULL, NULL,
+                FSM_PRIORITY,
+                0,
+                0);
+
 void fsm_update_gps_data(uint8_t fix, uint8_t sats, double lat, double lon, float alt) {
     if (k_mutex_lock(&fsm_mutex, K_FOREVER) == 0)
     {
@@ -149,9 +142,9 @@ void fsm_update_gps_data(uint8_t fix, uint8_t sats, double lat, double lon, floa
 
 void fsm_update_environment_data(float light, float temp, float hum) {
     if (k_mutex_lock(&fsm_mutex, K_FOREVER) == 0) {
-        data.light_pct = light;
-        data.temperature = temp;
-        data.humidity = hum;
+        data.light = light;
+        data.temp = temp;
+        data.hum = hum;
         
         data.flags &= ~0x0004;
         data.flags &= ~0x0008;

@@ -55,15 +55,15 @@ static void data_tx_thread(void *p1, void *p2, void *p3)
 
         if (fsm_get_telemetry(&packet))
         {
-            switch (mode)
+            switch (state)
             {
-                case TX_MODE_TEST:
+                case STATE_TEST:
                     send_test_data(&packet);
                     break;
-                case TX_MODE_NORMAL:
+                case STATE_NORMAL:
                     send_normal_data(&packet);
                     break;
-                case TX_MODE_SIMU:
+                case STATE_SIMU:
                     send_simu_data(&packet);
                     break;
                 default:
