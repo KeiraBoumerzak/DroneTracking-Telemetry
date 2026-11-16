@@ -3,7 +3,8 @@
 #include <zephyr/sys/printk.h>
 
 /* ================= timing ================= */
-#define IMU_PERIOD_MS  20          /* IMU thread: every 20 ms (50 Hz) */
+#define IMU_PERIOD_MS  20          /*IMU in NORMAL / SIMU: every 20 ms (50 Hz) */
+#define IMU_TEST_PERIOD_MS  2000   /* IMU in TEST: every 2 s */
 #define ENV_PERIOD_MS  2000   /* environment thread: Si7021 + LDR every 2 s */
 
 /* ================= MPU6050 ================= */

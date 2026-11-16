@@ -153,10 +153,36 @@ bool ldr_read(int *raw, float *light)
 	return *raw > 5 && *raw < 4090;
 }
 
+/* gyro calibration: 100 samples, 20 ms apart = 2 s, board must be still.
+ * Always at 20 ms whatever the mode: in TEST the IMU thread runs only every 2 s,
+ * so calibrating at that speed would take 200 s. Returns false if the MPU fails. */
+bool imu_calibrate(void)
+{
+	float acc[3], gyro[3];
+	float sum[3] = {0, 0, 0};
 
+	for (int n = 0; n < CAL_LOOPS; n++) {
+		if (!imu_read(acc, gyro)) {
+			return false;                      /* MPU failed during calibration */
+		}
+		for (int i = 0; i < 3; i++) {
+			sum[i] = sum[i] + gyro[i];
+		}
+		k_msleep(IMU_PERIOD_MS);               /* 20 ms between samples */
+	}
+	for (int i = 0; i < 3; i++) {
+		gyro_bias[i] = sum[i] / CAL_LOOPS;     /* average = gyro offset */
+	}
+	SENSOR_DBG("gyro calibrated: %+.2f %+.2f %+.2f deg/s\n",
+	           (double)gyro_bias[0], (double)gyro_bias[1], (double)gyro_bias[2]);
+	return true;
+}
 /*                    IMU thread (MPU6050)                       */
 /* ============================================================ */
-/* fast job: every 20 ms (50 Hz), highest priority */
+/* period depends on the mode (professor's feedback):
+ *   TEST         -> every 2 s, like all the sensors
+ *   NORMAL, SIMU -> every 20 ms (50 Hz, spec 20-50 Hz)
+ * highest priority: strictest deadline */
 void imu_thread(void)
 {
 	if (!device_is_ready(i2c)) {          /* is the I2C bus working? */
@@ -164,34 +190,33 @@ void imu_thread(void)
 	}
 
 	/* MPU6050 */
-	int cal_count = 0;                    /* samples used for gyro calibration */
 	float acc[3] = {0}, gyro[3] = {0};    /* latest IMU values */
 	bool imu_ok = imu_check();            /* is the MPU6050 there? */
 	if (imu_ok) {
 		imu_setup();
+		imu_ok = imu_calibrate();          /* 2 s, board still */
 	}
 
 	int64_t last_retry = 0;               /* time of the last MPU retry */
 	int64_t last_print = 0;               /* time of the last test print */
 
-	/* tested: the setup takes ~60 ms, so wake_time was already in the past
-	 * and the first loops ran with no wait. Taking the time here fixes it. */
+	/* tested: setup (+ now calibration) takes time, so wake_time is taken
+	 * after it. Otherwise the first loops would run with no wait. */
 	int64_t wake_time = k_uptime_get();   /* time now, in ms */
 
 	while (1) {
-		wake_time = wake_time + IMU_PERIOD_MS;   /* next wake-up: 20 ms later */
+		/* ask the app which mode we are in, and choose the period */
+		int period = (fsm_get_state() == STATE_TEST) ? IMU_TEST_PERIOD_MS : IMU_PERIOD_MS;
+		wake_time = wake_time + period;          /* next wake-up */
 		k_sleep(K_TIMEOUT_ABS_MS(wake_time));    /* sleep until that time */
 
 		/* MPU lost? try again once per second */
 		if (!imu_ok && k_uptime_get() - last_retry >= 1000) {
 			last_retry = k_uptime_get();
-			imu_ok = imu_check();
-			if (imu_ok) {
+			if (imu_check()) {
 				imu_setup();
-				cal_count = 0;                   /* sensor restarted: calibrate again */
-				for (int i = 0; i < 3; i++) {
-					gyro_bias[i] = 0;
-				}
+				imu_ok = imu_calibrate();      /* sensor restarted: calibrate again */
+				wake_time = k_uptime_get();    /* calibration took 2 s: restart the timing */
 			}
 		}
 
@@ -200,39 +225,20 @@ void imu_thread(void)
 		}
 
 		if (imu_ok) {
-			if (cal_count < CAL_LOOPS) {
-				/* first 2 s: board still, average the gyro */
-				for (int i = 0; i < 3; i++) {
-					gyro_bias[i] = gyro_bias[i] + gyro[i] / CAL_LOOPS;
-				}
-				cal_count = cal_count + 1;
-				if (cal_count == CAL_LOOPS) {
-					SENSOR_DBG("gyro calibrated: %+.2f %+.2f %+.2f deg/s\n",
-					           (double)gyro_bias[0], (double)gyro_bias[1],
-					           (double)gyro_bias[2]);
-				}
+			/* remove the gyro offset measured at calibration */
+			for (int i = 0; i < 3; i++) {
+				gyro[i] = gyro[i] - gyro_bias[i];
 			}
-			if (cal_count >= CAL_LOOPS) {
-				/* calibration done: remove the gyro offset */
-				for (int i = 0; i < 3; i++) {
-					gyro[i] = gyro[i] - gyro_bias[i];
-				}
-			}
-		}   /* end of if (imu_ok) */
-
-		/* send the IMU values to the app every 20 ms (only once calibrated) */
-		if (imu_ok && cal_count >= CAL_LOOPS) {
+			/* send the IMU values to the app */
 			fsm_update_imu_data(acc[0], acc[1], acc[2],
 			                    gyro[0], gyro[1], gyro[2]);
 		}
 
-		/* test print: every 1 s */
+		/* test print: every 1 s (in TEST: every loop, 2 s) */
 		if (k_uptime_get() - last_print >= 1000) {
 			last_print = k_uptime_get();
 			if (!imu_ok) {
 				SENSOR_DBG(" IMU   : not working, retrying...\n");
-			} else if (cal_count < CAL_LOOPS) {
-				SENSOR_DBG(" IMU   : calibrating, keep the board still...\n");
 			} else {
 				SENSOR_DBG(" acc   [m/s2]  X: %+6.2f | Y: %+6.2f | Z: %+6.2f\n",
 				           (double)acc[0], (double)acc[1], (double)acc[2]);
@@ -246,7 +252,7 @@ void imu_thread(void)
 
 /*              environment thread (Si7021 + LDR)                */
 /* ============================================================ */
-/* slow job: every 2 s, lower priority */
+
 void env_thread(void)
 {
 	/* Si7021 */
@@ -291,14 +297,13 @@ void env_thread(void)
 		SENSOR_DBG(" light : %5.1f %%     raw: %4d       ok = %d\n",
 		           (double)light, ldr_raw, ldr_ok);
 
-                   
+
 		wake_time = wake_time + ENV_PERIOD_MS;   /* next run: 2 s later */
 		k_sleep(K_TIMEOUT_ABS_MS(wake_time));    /* sleep until that time */
 	}   /* end of while */
 }       /* end of env_thread */
 
 /* start the two threads, 100 ms after boot:
- * IMU: stack 2048, priority 2 (strict 20 ms deadline)
  * environment: stack 2048, priority 4 (slow, can wait)
  * both use the same I2C bus: Zephyr's I2C driver locks it for each transfer */
 K_THREAD_DEFINE(imu_id, 2048, imu_thread, NULL, NULL, NULL, 2, 0, 100);
