@@ -1,5 +1,5 @@
-#ifndef MATH_H
-#define MATH_H
+#ifndef STATS_H
+#define STATS_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -41,5 +41,19 @@ typedef struct {
     AccelerationStats accel;
     AngularVelocityStats angVel;
 } Stats;
+
+typedef struct {
+    float min;
+    float max;
+    double sum;
+    uint32_t count;
+} StatAccumulator;
+
+void math_add_imu_sample(float ax, float ay, float az,
+                         float gx, float gy, float gz);
+
+void math_add_env_sample(float light, float hum, float temp);
+
+bool math_get_stats(Stats *out);
 
 #endif

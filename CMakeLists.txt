@@ -7,6 +7,7 @@ target_sources(app PRIVATE
     src/sensor/sensors.c
     src/sensor/gps.c
     src/control/app.c
+    src/control/stats.c
     src/control/button_handler.c
     src/control/data_tx.c
     src/actuator/rgb.c
