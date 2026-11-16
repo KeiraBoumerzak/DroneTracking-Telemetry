@@ -4,7 +4,9 @@
 #include <math.h>
 #include "stats.h"
 
-#define STATS_WINDOW_MS 30000
+#define STATS_WINDOW_S 30
+#define STATS_STACK_SIZE 1024
+#define STATS_THREAD_PRIORITY   9
 
 K_MUTEX_DEFINE(stats_mutex);
 K_MUTEX_DEFINE(stats_imu_mutex);
@@ -35,9 +37,9 @@ float calculate_angular_velocity(float gx, float gy, float gz)
     return sqrtf(gx * gx + gy * gy + gz * gz);
 }
 
-float calculate_mean(StatAccumulator *in)
+float calculate_mean(StatAccumulator in)
 {
-    return (in->sum/(float)in->count);
+    return (float)(in.sum/in.count);
 }
 
 
@@ -134,7 +136,7 @@ static void stats_thread_entry(void *p1, void *p2, void *p3)
 
     while (1)
     {
-        k_sem_take(&stat_sem);
+        k_sem_take(&stat_sem, K_FOREVER);
 
         k_mutex_lock(&stats_imu_mutex, K_FOREVER);
         aux_accel = accelAccumulator;
@@ -152,28 +154,41 @@ static void stats_thread_entry(void *p1, void *p2, void *p3)
         tempAccumulator = (StatAccumulator){0};
         k_mutex_unlock(&stats_env_mutex);
 
+        Stats result = {0};
+
+        result.accel.max = aux_accel.max;
+        result.accel.min = aux_accel.min;
+        result.accel.mean = calculate_mean(aux_accel);
+        result.angVel.max = aux_angVel.max;
+        result.angVel.min = aux_angVel.min;
+        result.angVel.mean = calculate_mean(aux_angVel);
+        result.light.max = aux_light.max;
+        result.light.min = aux_light.min;
+        result.light.mean = calculate_mean(aux_light);
+        result.hum.max = aux_hum.max;
+        result.hum.min = aux_hum.min;
+        result.hum.mean = calculate_mean(aux_hum);
+        result.temp.max = aux_temp.max;
+        result.temp.min = aux_temp.min;
+        result.temp.mean = calculate_mean(aux_temp);
+
+
         k_mutex_lock(&stats_mutex, K_FOREVER);
-        stats.accel.max = aux_accel.max;
-        stats.accel.min = aux_accel.min;
-        stats.accel.mean = calculate_mean(aux_accel);
-        stats.angVel.max = aux_angVel.max;
-        stats.angVel.min = aux_angVel.min;
-        stats.angVel.mean = calculate_mean(aux_angVel);
-        stats.light.max = aux_light.max;
-        stats.light.min = aux_light.min;
-        stats.light.mean = calculate_mean(aux_light);
-        stats.hum.max = aux_hum.max;
-        stats.hum.min = aux_hum.min;
-        stats.hum.mean = calculate_mean(aux_hum);
-        stats.temp.max = aux_temp.max;
-        stats.temp.min = aux_temp.min;
-        stats.temp.mean = calculate_mean(aux_temp);
+        stats = result;
         k_mutex_unlock(&stats_mutex);
     }
-    
 }
+
+K_THREAD_DEFINE(stats_tid,
+                STATS_STACK_SIZE,
+                stats_thread_entry,
+                NULL, NULL, NULL,
+                STATS_THREAD_PRIORITY,
+                0,
+                0);
 
 int stat_init(void)
 {
-    k_timer_start(&stat_timer, STATS_WINDOW_MS, STATS_WINDOW_MS);
+    k_timer_start(&stat_timer, K_SECONDS(STATS_WINDOW_S), K_SECONDS(STATS_WINDOW_S));
+    return true;
 }
