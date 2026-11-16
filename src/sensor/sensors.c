@@ -1,5 +1,6 @@
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/i2c.h>
+#include <zephyr/drivers/adc.h>
 #include "sensors.h"
 
 /* the I2C bus, from the overlay alias "sensor-i2c" (MPU6050 + Si7021) */
@@ -9,16 +10,6 @@ float gyro_bias[3] = {0, 0, 0};   /* gyro offset, measured at start-up */
 
 /*                          MPU6050                              */
 /* ============================================================ */
-/* Registers from the MPU6050 register map (datasheet):
- *   0x75 WHO_AM_I    -> must read 0x68
- *   0x6B PWR_MGMT_1  -> 0x01: wake up (starts asleep), gyro clock
- *   0x1A CONFIG      -> 0x04: low-pass filter ~21 Hz (below 25 Hz = half of 50 Hz)
- *   0x19 SMPLRT_DIV  -> 19:   1000 / (1 + 19) = 50 Hz
- *   0x1B GYRO_CONFIG -> 0x08: +-500 deg/s, 65.5 LSB per deg/s
- *   0x1C ACCEL_CONFIG-> 0x08: +-4 g, 8192 LSB per g
- *   0x3B..0x48       -> 14 data bytes: accel X,Y,Z / temp / gyro X,Y,Z */
-
-/* check the MPU6050 answers. Returns true if found. */
 bool imu_check(void)
 {
 	uint8_t id = 0;
@@ -35,12 +26,12 @@ bool imu_check(void)
 /* write 5 registers: wake up, filter, sample rate, gyro range, accel range */
 void imu_setup(void)
 {
-	i2c_reg_write_byte(i2c, MPU_ADDR, 0x6B, 0x01);  /* power: wake up, gyro clock */
-	k_msleep(10);                                    /* give it time to wake up */
-	i2c_reg_write_byte(i2c, MPU_ADDR, 0x1A, 0x04);  /* filter: about 21 Hz */
-	i2c_reg_write_byte(i2c, MPU_ADDR, 0x19, 19);    /* sample rate: 1000/(1+19) = 50 Hz */
-	i2c_reg_write_byte(i2c, MPU_ADDR, 0x1B, 0x08);  /* gyro range: +-500 deg/s */
-	i2c_reg_write_byte(i2c, MPU_ADDR, 0x1C, 0x08);  /* accel range: +-4 g */
+	i2c_reg_write_byte(i2c, MPU_ADDR, 0x6B, 0x01);  /* 0x6B power: wake up, gyro clock */
+	k_msleep(10);                                    /* wait for wake up */
+	i2c_reg_write_byte(i2c, MPU_ADDR, 0x1A, 0x04);  /* 0x1A CONFIG:filter: about 21 Hz */
+	i2c_reg_write_byte(i2c, MPU_ADDR, 0x19, 19);    /*  0x19 SMPLRT_DIV:sample rate: 1000/(1+19) = 50 Hz */
+	i2c_reg_write_byte(i2c, MPU_ADDR, 0x1B, 0x08);  /* 0x1B GYRO_CONFIG:gyro range: +-500 deg/s */
+	i2c_reg_write_byte(i2c, MPU_ADDR, 0x1C, 0x08);  /* 0x1C ACCEL_CONFIG:accel range: +-4 g */
 	k_msleep(50);   /* tested: sometimes the first read right after setup
 	                   returned only zeros (sample not ready yet), so the
 	                   sensor was set up twice. Waiting 50 ms fixes it. */
@@ -80,14 +71,7 @@ bool imu_read(float acc[3], float gyro[3])
 
 /*                    Si7021 (temp + humidity)                   */
 /* ============================================================ */
-/* Commands and formulas from the Si7021 datasheet:
- *   0xF5 = measure humidity, "no hold master mode": the sensor measures alone
- *          and the I2C bus stays free (the MPU can still use it)
- *   0xE0 = read the temperature taken during that same humidity measurement
- *          (no second measurement, no extra wait)
- *   humidity %  = 125    * code / 65536 - 6
- *   temperature = 175.72 * code / 65536 - 46.85   (code = 16-bit raw value)
- * A measurement takes about 20 ms, so we start it and read it 40 ms later. */
+/* A measurement takes about 20 ms, so we start it and read it 40 ms later. */
 
 /* step 1: send 0xF5 = "start measuring humidity" */
 bool si_start(void)
@@ -120,12 +104,61 @@ bool si_read(float *temp, float *hum)
 	return true;
 }
 
+/*                        LDR (light)                            */
+/* ============================================================ */
+
+const struct adc_dt_spec ldr = ADC_DT_SPEC_GET(DT_PATH(zephyr_user));
+int16_t adc_buf;                          /* the ADC writes the result here */
+struct adc_sequence adc_seq = {
+	.buffer      = &adc_buf,
+	.buffer_size = sizeof(adc_buf),
+};
+
+/* prepare the ADC channel. Returns true if OK. */
+bool ldr_init(void)
+{
+	if (!adc_is_ready_dt(&ldr)) {
+		return false;
+	}
+	if (adc_channel_setup_dt(&ldr) != 0) {
+		return false;
+	}
+	if (adc_sequence_init_dt(&ldr, &adc_seq) != 0) {
+		return false;
+	}
+	return true;
+}
+
+/* read the light: raw (0..4095) and light (0..100 %). Returns true if OK. */
+bool ldr_read(int *raw, float *light)
+{
+	int sum = 0;
+
+	/* 4 readings and average, so one noisy value does not matter */
+	for (int i = 0; i < 4; i++) {
+		if (adc_read_dt(&ldr, &adc_seq) != 0) {
+			return false;
+		}
+		sum = sum + adc_buf;
+	}
+	*raw = sum / 4;
+
+	/* two-point calibration: LDR_DARK -> 0 %, LDR_BRIGHT -> 100 %
+	 * (works also if the module gives a lower value with more light) */
+	*light = (*raw - LDR_DARK) * 100.0f / (LDR_BRIGHT - LDR_DARK);
+	if (*light < 0)   *light = 0;          /* keep it in 0..100 % */
+	if (*light > 100) *light = 100;
+
+	/* raw stuck at 0 or 4095 = wire probably disconnected or shorted */
+	return *raw > 5 && *raw < 4090;
+}
+
 /*                       sensors thread                          */
 /* ============================================================ */
 
 void sensors_thread(void)
 {
-		int loops = 0;                        /* how many times we ran */
+	int loops = 0;                        /* how many times we ran */
 
 	if (!device_is_ready(i2c)) {          /* is the I2C bus working? */
 		SENSOR_DBG("I2C bus not ready\n");
@@ -143,6 +176,19 @@ void sensors_thread(void)
 	float temp = 0, hum = 0;              /* last good values */
 	bool si_ok = false;                   /* Si7021 working? */
 	bool si_started = si_start();         /* start one now, so the first read (40 ms) works */
+
+    	/* LDR */
+	int ldr_raw = 0;                      /* last ADC value (0..4095) */
+	float light = 0;                      /* last light value (0..100 %) */
+	bool ldr_ready = ldr_init();          /* ADC set up? */
+	bool ldr_ok = false;                  /* LDR value valid? */
+    	if (ldr_ready) {
+		ldr_ok = ldr_read(&ldr_raw,
+             &light);   /* first reading now, so t = 0 shows real light */
+	}
+	if (!ldr_ready) {
+		SENSOR_DBG("LDR: ADC not ready\n");
+	}
 
     /* tested: the first ENV line was 0.0 / si_ok = 0. The setup takes ~60 ms,
 	 * so wake_time was already in the past and the first loops ran with no wait:
@@ -206,24 +252,34 @@ void sensors_thread(void)
 			} else {
 				si_ok = false;                   /* keep the last good values */
 			}
-			SENSOR_DBG("ENV: temp = %+05.1f C | hum = %05.1f %% | si_ok = %d\n",
-			           (double)temp, (double)hum, si_ok);
-		}
+			}
 
-		/* ------------------ test print: every 1 s ------------------ */
-		if (loops % 50 == 0) {
+            /* ------------------ LDR: every 2 s ------------------ */
+		/* the ADC is fast (much less than 1 ms), so we read it directly */
+		if (phase == 0 && ldr_ready) {
+			ldr_ok = ldr_read(&ldr_raw, &light);
+			}
+
+		/* ------------------ test print: every 2 s ------------------ */
+		if (phase == 3) {
+			SENSOR_DBG("\n============ SENSORS (t = %d s) ============\n", loops / 50);
 			if (!imu_ok) {
-				SENSOR_DBG("IMU: not working, retrying...\n");
-			} else if (cal_count >= CAL_LOOPS) {  /* print only after calibration */
-				SENSOR_DBG("\n---------------- IMU ----------------\n");
-				SENSOR_DBG(" acc  [m/s2]   X: %+07.2f | Y: %+07.2f | Z: %+07.2f\n",
+				SENSOR_DBG(" IMU   : not working, retrying...\n");
+			} else if (cal_count < CAL_LOOPS) {
+				SENSOR_DBG(" IMU   : calibrating, keep the board still...\n");
+			} else {
+				SENSOR_DBG(" acc   [m/s2]  X: %+6.2f | Y: %+6.2f | Z: %+6.2f\n",
 				           (double)acc[0], (double)acc[1], (double)acc[2]);
-				SENSOR_DBG(" gyro [deg/s]  X: %+08.1f | Y: %+08.1f | Z: %+08.1f\n",
+				SENSOR_DBG(" gyro  [deg/s] X: %+6.1f | Y: %+6.1f | Z: %+6.1f\n",
 				           (double)gyro[0], (double)gyro[1], (double)gyro[2]);
 			}
-		}
-	}   /* end of while */
-}       /* end of sensors_thread */
+			SENSOR_DBG(" temp  : %+5.1f C    hum: %5.1f %%    ok = %d\n",
+			           (double)temp, (double)hum, si_ok);
+			SENSOR_DBG(" light : %5.1f %%     raw: %4d       ok = %d\n",
+			(double)light, ldr_raw, ldr_ok);
+                            }    
+	}   
+}       
 
 /* start the thread: stack 2048, priority 2, starts 100 ms after boot */
 K_THREAD_DEFINE(sensors_id, 2048, sensors_thread, NULL, NULL, NULL, 2, 0, 100);

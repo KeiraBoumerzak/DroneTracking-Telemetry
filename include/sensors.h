@@ -15,6 +15,10 @@
 #define SI_ADDR        0x40        /* I2C address (fixed) */
 #define ENV_LOOPS      100          /* environment (temp, hum, light): read every 100 loops = 2 s */
 
+/* ================= LDR ================= */
+#define LDR_DARK       3900           /* raw value covered -> 0 %   */
+#define LDR_BRIGHT     120        /* raw value torch   -> 100 %  */
+
 /* ================= test prints ================= */
 #define SENSOR_DEBUG   1           /* 1 = on, 0 = off (final version) */
 #define SENSOR_DBG(...) do { if (SENSOR_DEBUG) printk(__VA_ARGS__); } while (0)
