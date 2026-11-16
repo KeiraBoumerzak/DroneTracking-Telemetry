@@ -122,7 +122,7 @@
 
       "args": [
         "-serial",
-        "COM5", // Remember to change COM port to the one assigned by Windows OS to the board
+        "COM6", // Remember to change COM port to the one assigned by Windows OS to the board
         "-sercfg",
         "115200,8,n,1,N"
       ],
