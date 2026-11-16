@@ -1,94 +1,266 @@
 {
-    "version": "2.0.0",
+  "version": "2.0.0",
 
-    "tasks": [
-        {
-            "label": "Zephyr: Configure",
-            "type": "shell",
-            "command": "cmake",
-            "args": [
-                "-B",
-                "build",
-                "-S",
-                ".",
-                "-GNinja",
-                "-DBOARD=nucleo_wl55jc",
-                "-DZephyr-sdk_DIR=C:/Users/STERALLIA/zephyr-sdk-1.0.1/cmake",
-                "-DDTC_OVERLAY_FILE=C:/Users/STERALLIA/Documents/GitHub/Blink-exercise-EMB-MasterIOT-UPM/boards/nucleo_wl55jc.overlay",
-                "-DCONF_FILE=C:/Users/STERALLIA/Documents/GitHub/Blink-exercise-EMB-MasterIOT-UPM/confs/prj_nucleo_wl55jc.conf"
-            ],
-            "options": {
-                "cwd": "C:/Users/STERALLIA/Documents/GitHub/Blink-exercise-EMB-MasterIOT-UPM",
-                "env": {
-                    "ZEPHYR_BASE": "C:/Users/STERALLIA/Documents/zephyrproject/zephyr",
-                    "ZEPHYR_SDK_INSTALL_DIR": "C:/Users/STERALLIA/zephyr-sdk-1.0.1"
-                }
-            },
-            "problemMatcher": []
-        },
+  "tasks": [
 
-        {
-            "label": "Zephyr: Build",
-            "type": "shell",
-            "command": "cmake",
-            "args": [
-                "--build",
-                "build"
-            ],
-            "options": {
-                "cwd": "C:/Users/STERALLIA/Documents/GitHub/Blink-exercise-EMB-MasterIOT-UPM",
-                "env": {
-                    "ZEPHYR_BASE": "C:/Users/STERALLIA/Documents/zephyrproject/zephyr",
-                    "ZEPHYR_SDK_INSTALL_DIR": "C:/Users/STERALLIA/zephyr-sdk-1.0.1"
-                }
-            },
-            "problemMatcher": []
-        },
+    // ============================================================
+    // BUILD
+    // ============================================================
 
-        {
-            "label": "Zephyr: Flash",
-            "type": "shell",
-            "command": "C:/Program Files/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin/STM32_Programmer_CLI.exe",
-            "args": [
-                "--connect",
-                "port=swd",
-                "mode=UR",
-                "reset=HWrst",
-                "--download",
-                "C:/Users/STERALLIA/Documents/GitHub/Blink-exercise-EMB-MasterIOT-UPM/build/zephyr/zephyr.hex",
-                "--start"
-            ],
-            "options": {
-                "cwd": "C:/Users/STERALLIA/Documents/GitHub/Blink-exercise-EMB-MasterIOT-UPM"
-            },
-            "problemMatcher": []
-        },
+    {
+      "label": "West Build (auto)",
+      "type": "shell",
 
-        {
-            "label": "Serial Monitor: COM3",
-            "type": "shell",
-            "command": "C:/Program Files/PuTTY/plink.exe",
-            "args": [
-                "-serial",
-                "COM3",
-                "-sercfg",
-                "115200,8,n,1,N"
-            ],
-            "problemMatcher": [],
-            "presentation": {
-                "reveal": "always",
-                "panel": "dedicated"
-            }
-        },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
 
-        {
-            "label": "Zephyr: Build + Flash",
-            "dependsOrder": "sequence",
-            "dependsOn": [
-                "Zephyr: Build",
-                "Zephyr: Flash"
-            ],
-            "problemMatcher": []
-        }
-    ]
+      "windows": {
+        "command": "C:/Asignaturas/EMB_PLA_COM/zephyrproject/.venv/Scripts/west.exe"
+      },
+
+      "args": [
+        "build",
+
+        "-p",
+        "auto",
+
+        "-b",
+        "nucleo_wl55jc",
+
+        "$env:PROJECT_DIR",
+
+        "-d",
+        
+        "$env:PROJECT_DIR/build",
+        
+        "-DZephyr-sdk_DIR=C:/Asignaturas/EMB_PLA_COM/zephyr-sdk-1.0.1/cmake",
+
+        "-DUSER_CACHE_DIR=C:/Users/adria/Downloads/DroneTracking-Telemetry/.zephyr-cache",
+
+        "-DDTC_OVERLAY_FILE='./boards/nucleo_wl55jc.overlay'",
+
+        "-DCONF_FILE='./prj.conf'",
+
+        "-DUSE_CCACHE=0"
+      ],
+
+      "options": {
+        "cwd": "C:/Asignaturas/EMB_PLA_COM/zephyrproject"
+      },
+
+      "problemMatcher": [
+        "$gcc"
+      ]
+    },
+
+
+    // ============================================================
+    // FLASH
+    // ============================================================
+
+    {
+      "label": "Flash (CubeProgrammer, UR+HWrst)",
+      "type": "shell",
+
+      "windows": {
+        "command": "C:\\Program Files\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin\\STM32_Programmer_CLI.exe"
+      },
+
+      "args": [
+        "--connect",
+        "port=swd",
+        "mode=UR",
+        "reset=HWrst",
+
+        "--download",
+        "$env:PROJECT_DIR\\build\\zephyr\\zephyr.hex",
+
+        "--start"
+      ],
+
+      "problemMatcher": []
+    },
+
+
+    // ============================================================
+    // SERIAL - LIST PORTS
+    // ============================================================
+
+    {
+      "label": "List COM Ports",
+      "type": "shell",
+
+      "windows": {
+        "command": "powershell"
+      },
+
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        "Get-CimInstance Win32_SerialPort | Select-Object DeviceID, Name, Description"
+      ],
+
+      "problemMatcher": []
+    },
+
+
+    // ============================================================
+    // SERIAL MONITOR
+    // ============================================================
+
+    {
+      "label": "Serial Monitor",
+      "type": "shell",
+
+      "windows": {
+        "command": "C:\\Program Files\\PuTTY\\plink.exe"
+      },
+
+      "args": [
+        "-serial",
+        "COM5", // Remember to change COM port to the one assigned by Windows OS to the board
+        "-sercfg",
+        "115200,8,n,1,N"
+      ],
+
+      "problemMatcher": []
+    },
+
+
+    // ============================================================
+    // CLEAN BUILD
+    // ============================================================
+
+    {
+      "label": "Clean Build",
+      "type": "shell",
+
+      "windows": {
+        "command": "powershell"
+      },
+
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        "Remove-Item -Recurse -Force \"$env:PROJECT_DIR/build\" -ErrorAction SilentlyContinue"
+      ],
+
+      "problemMatcher": []
+    },
+
+
+    // ============================================================
+    // CLEAN CACHE
+    // ============================================================
+
+    {
+      "label": "Clean Cache",
+      "type": "shell",
+
+      "windows": {
+        "command": "powershell"
+      },
+
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        "Remove-Item -Recurse -Force \"$env:PROJECT_DIR/.zephyr-cache\" -ErrorAction SilentlyContinue"
+      ],
+
+      "problemMatcher": []
+    },
+
+
+    // ============================================================
+    // DEBUG SERVER
+    //
+    // 1. Compila
+    // 2. Ejecuta west debugserver sobre ESE build
+    // 3. Espera a que OpenOCD abra :3333
+    // ============================================================
+
+{
+  "label": "Zephyr: Debug Server",
+  "type": "shell",
+
+  "windows": {
+    "command": "C:/Asignaturas/EMB_PLA_COM/zephyrproject/.venv/Scripts/west.exe"
+  },
+
+  "args": [
+    "debugserver",
+    "-d",
+    "$env:PROJECT_DIR/build"
+  ],
+
+  "options": {
+    "cwd": "C:/Asignaturas/EMB_PLA_COM/zephyrproject"
+  },
+
+  "dependsOn": [
+    "West Build (auto)"
+  ],
+
+  "dependsOrder": "sequence",
+
+  "isBackground": true,
+
+  "problemMatcher": {
+    "owner": "zephyr-debug",
+
+    "pattern": {
+      "regexp": "^(.*)$",
+      "message": 1
+    },
+
+    "background": {
+      "activeOnStart": true,
+      "endsPattern": "OpenOCD GDB server running on port 3333.*"
+    }
+  },
+
+  "presentation": {
+    "reveal": "always",
+    "panel": "dedicated",
+    "clear": true
+  }
+},
+
+
+
+    // ============================================================
+    // STOP OPENOCD
+    // ============================================================
+
+    {
+      "label": "Zephyr: Stop Debug Server",
+      "type": "shell",
+
+      "windows": {
+        "command": "taskkill"
+      },
+
+      "args": [
+        "/F",
+        "/IM",
+        "openocd.exe"
+      ],
+
+      "problemMatcher": [],
+
+      "presentation": {
+        "reveal": "silent",
+        "close": true
+      }
+    }
+
+  ]
 }

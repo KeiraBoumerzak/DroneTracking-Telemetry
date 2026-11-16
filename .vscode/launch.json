@@ -9,10 +9,10 @@
       "request": "launch",
 
       "cwd":
-        "C:/Users/local_profedte/Downloads/blink_basic",
+        "C:/Users/adria/Downloads/DroneTracking-Telemetry",
 
       "executable":
-        "C:/Users/local_profedte/Downloads/blink_basic/build/zephyr/zephyr.elf",
+        "C:/Users/adria/Downloads/DroneTracking-Telemetry/build/zephyr/zephyr.elf",
 
       "servertype": "external",
       "gdbTarget": "localhost:3333",

@@ -8,7 +8,9 @@ target_sources(app PRIVATE
     src/sensor/gps.c
     src/control/app.c
     src/control/util.c
-    src/actuator/led.c
+    src/control/data_tx.c
+    src/actuator/rgb.c
+    src/control/button_handler.c
 )
 
 target_include_directories(app PRIVATE include)
